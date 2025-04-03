@@ -1,0 +1,245 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+/**
+ * Create a stdio-based MCP server
+ *
+ * @param {Object} config - Configuration for the stdio server
+ * @param {string} config.name - The name of the server
+ * @param {string} config.command - The command to execute
+ * @param {string[]} config.args - The arguments to pass to the command
+ * @param {Object} config.options - Options for child_process.spawn
+ * @param {string} [config.description] - Description of the server
+ * @param {string} [config.authType='none'] - Authentication type
+ * @returns {Promise<Object>} The created server object
+ */
+export async function createStdioServer(config) {
+  const {
+    name,
+    command,
+    args = [],
+    options = { shell: true, cwd: process.cwd() },
+    description,
+    authType = "none",
+  } = config;
+
+  const serverName = name;
+  const serverId = `${serverName}-${Date.now()}`;
+
+  console.log(`Creating stdio server: ${serverName}`);
+  console.log(`Command: ${command} ${args.join(" ")}`);
+
+  // For npx commands, add -y to make it non-interactive
+  let finalArgs = args;
+  if (command === "npx") {
+    finalArgs = ["-y", ...args];
+  }
+
+  // Create the transport
+  const transport = new StdioClientTransport({
+    command: command,
+    args: finalArgs,
+    options,
+  });
+
+  // Create the MCP client
+  const mcpClient = new Client(
+    {
+      name: "toolbelt-bridge",
+      version: "1.0.0", // You may want to get this from package.json
+    },
+    {
+      capabilities: {
+        prompts: {},
+        resources: {},
+        tools: {},
+      },
+    }
+  );
+
+  try {
+    // Connect to the server via the client
+    await mcpClient.connect(transport);
+    console.log(`MCP client connected to ${serverName} via stdio`);
+  } catch (error) {
+    console.error(`Error connecting to MCP server via stdio: ${error.message}`);
+    throw error;
+  }
+
+  // Get the process
+  const serverProcess = transport.process;
+
+  // Add handlers for logging
+  if (serverProcess && serverProcess.stdout) {
+    serverProcess.stdout.on("data", (data) => {
+      const output = data.toString().trim();
+      if (output) {
+        console.log(
+          `[${serverName}] stdout:`,
+          output.substring(0, 200) + (output.length > 200 ? "..." : "")
+        );
+      }
+    });
+  }
+
+  if (serverProcess && serverProcess.stderr) {
+    serverProcess.stderr.on("data", (data) => {
+      const output = data.toString().trim();
+      if (output) {
+        console.error(
+          `[${serverName}] stderr:`,
+          output.substring(0, 200) + (output.length > 200 ? "..." : "")
+        );
+      }
+    });
+  }
+
+  // Try to list tools immediately to check the connection
+  let toolsList = [];
+  try {
+    toolsList = await mcpClient.listTools();
+    console.log(`Successfully listed tools from ${serverName}`);
+  } catch (toolError) {
+    console.log(
+      `Could not list tools from ${serverName} yet: ${toolError.message}`
+    );
+  }
+
+  // Extract tools from toolsList safely
+  const extractedTools = Array.isArray(toolsList)
+    ? toolsList.map((tool) =>
+        typeof tool === "string" ? tool : tool.name || String(tool)
+      )
+    : toolsList.tools
+      ? toolsList.tools.map((tool) =>
+          typeof tool === "string" ? tool : tool.name || String(tool)
+        )
+      : [];
+
+  // Create the server object
+  const server = {
+    name: serverName,
+    id: serverId,
+    description: description || `MCP server for ${serverName} (stdio)`,
+    authType,
+    isCodedServer: true,
+    tools: extractedTools,
+    hasPreFetchedTools: true,
+    client: mcpClient,
+    process: serverProcess,
+
+    // Connect to the server
+    connect: async (bridgeTransport) => {
+      console.log(`Connecting to ${serverName} via stdio`);
+
+      // Create a sendRequest function and attach it to the transport
+      bridgeTransport.sendRequest = async (request) => {
+        try {
+          console.log(
+            `Sending request to ${serverName}: ${JSON.stringify(request)}`
+          );
+
+          // Convert the bridge request format to MCP client format
+          let result;
+
+          if (
+            request.method === "tools/list" ||
+            request.type === "list_tools"
+          ) {
+            console.log(`Using mcpClient.listTools() for ${serverName}`);
+            result = await mcpClient.listTools();
+            return { tools: result };
+          } else if (request.method && request.method.startsWith("tools/")) {
+            // Handle tool call
+            const toolName = request.method.split("/")[1];
+            console.log(`Using mcpClient.callTool() for ${toolName}`);
+            result = await mcpClient.callTool({
+              name: toolName,
+              arguments: request.params || {},
+            });
+            return { result };
+          } else if (request.type === "call_tool") {
+            console.log(`Using mcpClient.callTool() for ${request.name}`);
+            result = await mcpClient.callTool({
+              name: request.name,
+              arguments: request.arguments || {},
+            });
+            return { result };
+          } else {
+            console.log(
+              `Unknown request type, passing through: ${JSON.stringify(request)}`
+            );
+            throw new Error(
+              `Unsupported request type: ${request.method || request.type}`
+            );
+          }
+        } catch (error) {
+          console.error(
+            `Error handling request to ${serverName}: ${error.message}`
+          );
+          throw error;
+        }
+      };
+
+      // Set up onRequest handler as well for incoming requests
+      bridgeTransport.onRequest = async (request) => {
+        return bridgeTransport.sendRequest(request);
+      };
+
+      return bridgeTransport;
+    },
+
+    // Disconnect from the server
+    disconnect: async () => {
+      console.log(`Disconnecting from ${serverName}`);
+      try {
+        await mcpClient.disconnect();
+        console.log(`MCP client disconnected from ${serverName}`);
+
+        if (serverProcess && !serverProcess.killed) {
+          serverProcess.kill();
+          console.log(`Process for ${serverName} terminated`);
+        }
+      } catch (error) {
+        console.error(
+          `Error disconnecting MCP client from ${serverName}: ${error.message}`
+        );
+      }
+    },
+  };
+
+  return server;
+}
+
+/**
+ * Start a stdio service using the given configuration
+ *
+ * @param {Object} config - The service configuration
+ * @returns {Promise<Object>} The created server
+ */
+export async function startStdioService(config) {
+  try {
+    // Create the stdio server
+    const server = await createStdioServer(config);
+
+    // Add process exit handler
+    if (server.process) {
+      server.process.on("exit", (code) => {
+        console.log(
+          `Server process for ${server.name} exited with code ${code}`
+        );
+      });
+
+      server.process.on("error", (error) => {
+        console.error(
+          `Error in server process for ${server.name}: ${error.message}`
+        );
+      });
+    }
+
+    return server;
+  } catch (error) {
+    console.error(`Failed to start stdio service: ${error.message}`);
+    throw error;
+  }
+}
