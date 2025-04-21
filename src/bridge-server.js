@@ -840,6 +840,20 @@ class McpBridgeServer {
             error: error.message || "Unknown error",
           });
         }
+      } else if (request.method === "initialize") {
+        const response = {
+          protocolVersion: "2024-11-05",
+          capabilities: {
+            tools: {},
+          },
+          serverInfo: { name: serverName, version: "1.0.0" },
+        };
+        this.sendResponse(requestId, { response });
+      } else {
+        console.warn(`Unknown request method: ${request.method}`);
+        this.sendResponse(requestId, {
+          error: `Unknown request method: ${request.method}`,
+        });
       }
     } catch (error) {
       console.error(`Error handling MCP request for ${serverName}:`, error);
