@@ -107,6 +107,7 @@ class McpBridgeServer {
           command: server.command,
           args: server.args || [],
           options: server.options || { shell: true, cwd: process.cwd() },
+          env: server.env || undefined
         };
       }
 
@@ -159,6 +160,7 @@ class McpBridgeServer {
               command: serverConfig.command,
               args: serverConfig.args,
               options: { shell: true, cwd: process.cwd() },
+              env: serverConfig.env || {},
             },
             requestId: `restore-${name}-${Date.now()}`,
           });
@@ -345,6 +347,7 @@ class McpBridgeServer {
         command,
         args,
         options,
+        env: mcpServer.env || undefined,
       },
       process: processHandle,
       id: serverId,
@@ -906,25 +909,39 @@ class McpBridgeServer {
           args = [...parts.slice(1), ...args];
         }
 
+        // Create options object with environment variables if provided
+        let options = serviceConfig.options || { shell: true, cwd: process.cwd() };
+
+        // Handle environment variables
+        if (serviceConfig.env && typeof serviceConfig.env === 'object') {
+          // Start with a copy of the current process environment
+          this.log(
+            "info",
+            `Adding ${Object.keys(serviceConfig.env).length} environment variables for ${serviceConfig.name}`
+          );
+        }
+
         // Use startStdioService from stdio-utils.js
         const server = await startStdioService({
           name: serviceConfig.name,
           command: command,
           args: args,
           options: serviceConfig.options || { shell: true, cwd: process.cwd() },
+          env: serviceConfig.env || {},
           description:
             serviceConfig.description ||
             `MCP server for ${serviceConfig.name} (stdio)`,
           authType: serviceConfig.authType || "none",
         });
 
+        console.log('start serviceConfig', serviceConfig)
         // Store the command and args in the server object for persistence
         server.command = command;
         server.args = args;
-        server.options = serviceConfig.options || {
-          shell: true,
-          cwd: process.cwd(),
-        };
+        server.options = options;
+        if (serviceConfig.env) {
+          server.env = serviceConfig.env;
+        }
 
         // Register the server with the bridge
         newServerData = await this.registerServer(server, server.process);
@@ -1076,6 +1093,7 @@ class McpBridgeServer {
           command: server.command,
           args: server.args || [],
           options: server.options || { shell: true, cwd: process.cwd() },
+          env: server.env || undefined
         };
       }
     }

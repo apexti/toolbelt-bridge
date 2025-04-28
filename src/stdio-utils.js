@@ -21,6 +21,7 @@ export async function createStdioServer(config) {
     options = { shell: true, cwd: process.cwd() },
     description,
     authType = "none",
+    env
   } = config;
 
   const serverName = name;
@@ -40,6 +41,7 @@ export async function createStdioServer(config) {
     command: command,
     args: finalArgs,
     options,
+    env: env ? { ...process.env, ...env } : undefined
   });
 
   // Create the MCP client
