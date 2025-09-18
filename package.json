@@ -1,6 +1,6 @@
 {
   "name": "@toolbelt/mcp-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bridge for running MCP servers locally and connecting to Toolbelt",
   "main": "src/index.js",
   "type": "module",

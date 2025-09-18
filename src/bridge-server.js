@@ -107,7 +107,7 @@ class McpBridgeServer {
           command: server.command,
           args: server.args || [],
           options: server.options || { shell: true, cwd: process.cwd() },
-          env: server.env || undefined
+          env: server.env || undefined,
         };
       }
 
@@ -316,7 +316,10 @@ class McpBridgeServer {
    */
   async registerServer(mcpServer, processHandle = null) {
     const serverName = mcpServer.name;
-    const serverId = mcpServer.id || `${serverName}-${Date.now()}`;
+
+    // Use a stable ID based on connection ID and server name instead of timestamp
+    // This ensures the same service gets the same ID across restarts
+    const serverId = mcpServer.id || `${serverName}-${this.connectionId}`;
 
     if (this.localServers.has(serverName)) {
       this.log("warn", `Server ${serverName} already registered`);
@@ -829,10 +832,7 @@ class McpBridgeServer {
           const toolsResponse = {
             tools: tools,
           };
-          console.log(
-            `Sending tools response to Toolbelt for ${serverName}:`,
-            toolsResponse
-          );
+
           this.sendResponse(requestId, { response: toolsResponse });
         } catch (error) {
           console.error(
@@ -910,10 +910,13 @@ class McpBridgeServer {
         }
 
         // Create options object with environment variables if provided
-        let options = serviceConfig.options || { shell: true, cwd: process.cwd() };
+        let options = serviceConfig.options || {
+          shell: true,
+          cwd: process.cwd(),
+        };
 
         // Handle environment variables
-        if (serviceConfig.env && typeof serviceConfig.env === 'object') {
+        if (serviceConfig.env && typeof serviceConfig.env === "object") {
           // Start with a copy of the current process environment
           this.log(
             "info",
@@ -934,7 +937,7 @@ class McpBridgeServer {
           authType: serviceConfig.authType || "none",
         });
 
-        console.log('start serviceConfig', serviceConfig)
+        console.log("start serviceConfig", serviceConfig);
         // Store the command and args in the server object for persistence
         server.command = command;
         server.args = args;
@@ -1093,7 +1096,7 @@ class McpBridgeServer {
           command: server.command,
           args: server.args || [],
           options: server.options || { shell: true, cwd: process.cwd() },
-          env: server.env || undefined
+          env: server.env || undefined,
         };
       }
     }
