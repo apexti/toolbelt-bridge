@@ -1,8 +1,11 @@
 {
-  "name": "@toolbelt/mcp-bridge",
-  "version": "0.1.1",
+  "name": "@apexti/mcp-bridge",
+  "version": "0.1.6",
   "description": "Bridge for running MCP servers locally and connecting to Toolbelt",
   "main": "src/index.js",
+  "bin": {
+    "toolbelt-bridge": "./src/index.js"
+  },
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
@@ -14,7 +17,7 @@
     "bridge",
     "toolbelt"
   ],
-  "author": "Toolbelt",
+  "author": "Apexti",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.3",

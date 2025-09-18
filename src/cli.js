@@ -18,8 +18,8 @@ const __dirname = dirname(__filename);
 const packagePath = join(__dirname, "..", "package.json");
 const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
 
-// Get settings path
-const settingsPath = join(__dirname, "..", "settings.json");
+// Get settings path - use current working directory
+const settingsPath = join(process.cwd(), "settings.json");
 
 // Function to load API key from settings
 function loadApiKeyFromSettings() {

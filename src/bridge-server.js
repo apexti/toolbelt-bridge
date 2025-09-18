@@ -39,7 +39,7 @@ class McpBridgeServer {
     this.maxReconnectAttempts = 10;
     this.pingInterval = null;
     this.logLevel = config.logLevel || "info";
-    this.settingsPath = path.join(__dirname, "..", "settings.json");
+    this.settingsPath = path.join(process.cwd(), "settings.json");
 
     // Allow disabling SSL verification for development
     this.rejectUnauthorized = config.rejectUnauthorized !== false;
