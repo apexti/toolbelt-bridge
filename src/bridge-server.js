@@ -39,6 +39,7 @@ class McpBridgeServer {
     this.maxReconnectAttempts = 10;
     this.pingInterval = null;
     this.logLevel = config.logLevel || "info";
+    this.debug = config.debug || this.logLevel === "debug";
     this.settingsPath = path.join(process.cwd(), "settings.json");
 
     // Allow disabling SSL verification for development
@@ -332,13 +333,14 @@ class McpBridgeServer {
     let args = mcpServer.args || [];
     let options = mcpServer.options || { shell: true, cwd: process.cwd() };
 
-    // If we have a process handle, try to get command info from it
-    if (processHandle) {
-      command = processHandle.spawnfile || processHandle.argv[0];
-      args = processHandle.argv.slice(1) || [];
+    // If we have a process handle and no server config, try to get command info from it
+    if (processHandle && (!mcpServer.command || !mcpServer.args)) {
+      command = command || processHandle.spawnfile || processHandle.argv?.[0];
+      args = args.length > 0 ? args : processHandle.argv?.slice(1) || [];
       options = {
+        ...options,
         shell: true,
-        cwd: processHandle.cwd || process.cwd(),
+        cwd: processHandle.cwd || options.cwd || process.cwd(),
       };
     }
 
@@ -776,12 +778,12 @@ class McpBridgeServer {
           const toolName = request.params?.name;
           const toolArgs = request.params?.arguments || {};
 
-          console.log(`Handling filesystem tool call: ${toolName}`, toolArgs);
+          this.log("info", `Tool call: ${serverData.name}/${toolName}`);
           const response = await client.callTool(request.params);
 
           this.sendResponse(requestId, { response });
         } catch (error) {
-          console.error(`Error handling filesystem tool call:`, error);
+          this.log("error", `Tool call failed: ${toolName} - ${error.message}`);
           this.sendResponse(requestId, {
             error:
               error.message || "Unknown error processing filesystem operation",
@@ -790,26 +792,14 @@ class McpBridgeServer {
       } else if (request.method === "tools/list") {
         try {
           const response = await client.listTools();
-          // Log the response for debugging
-          console.log(
-            `Got raw response for tools/list from ${serverName}:`,
-            response
-          );
+          this.log("debug", `Listing tools for ${serverName}`);
 
           // Extract tools from the response if present
           let tools = [];
           if (response && response.tools && Array.isArray(response.tools)) {
             tools = response.tools;
-            console.log(
-              `Extracted ${tools.length} tools from server ${serverName}`
-            );
           } else if (response && Array.isArray(response)) {
             tools = response;
-            console.log(
-              `Extracted ${tools.length} tools from array response from ${serverName}`
-            );
-          } else {
-            console.log(`No tools found in response from ${serverName}`);
           }
 
           // Update the server's tools array if we found tools
@@ -817,15 +807,18 @@ class McpBridgeServer {
             const server = this.localServers.get(serverName);
             server.tools = tools;
 
-            // Log tool names for debugging
+            // Log tool names for info level
             const toolNames = tools
               .map((tool) =>
                 typeof tool === "string" ? tool : tool.name || "unnamed"
               )
               .filter(Boolean);
-            console.log(
-              `Server ${serverName} now has ${tools.length} tools: ${toolNames.join(", ")}`
+            this.log(
+              "info",
+              `${serverName}: ${tools.length} tools available [${toolNames.join(", ")}]`
             );
+          } else {
+            this.log("warn", `${serverName}: No tools found`);
           }
 
           // Send response with tools (original response if it had tools, or our fallback tools)
@@ -835,9 +828,9 @@ class McpBridgeServer {
 
           this.sendResponse(requestId, { response: toolsResponse });
         } catch (error) {
-          console.error(
-            `Error handling tools/list request for ${serverName}:`,
-            error
+          this.log(
+            "error",
+            `Tools list failed for ${serverName}: ${error.message}`
           );
           this.sendResponse(requestId, {
             error: error.message || "Unknown error",
@@ -853,13 +846,16 @@ class McpBridgeServer {
         };
         this.sendResponse(requestId, { response });
       } else {
-        console.warn(`Unknown request method: ${request.method}`);
+        this.log("warn", `Unknown request method: ${request.method}`);
         this.sendResponse(requestId, {
           error: `Unknown request method: ${request.method}`,
         });
       }
     } catch (error) {
-      console.error(`Error handling MCP request for ${serverName}:`, error);
+      this.log(
+        "error",
+        `MCP request failed for ${serverName}: ${error.message}`
+      );
       this.sendResponse(requestId, {
         error: error.message || "Unknown error",
       });
@@ -935,9 +931,10 @@ class McpBridgeServer {
             serviceConfig.description ||
             `MCP server for ${serviceConfig.name} (stdio)`,
           authType: serviceConfig.authType || "none",
+          debug: this.logLevel === "debug",
         });
 
-        console.log("start serviceConfig", serviceConfig);
+        this.log("debug", `Starting service: ${serviceConfig.name}`);
         // Store the command and args in the server object for persistence
         server.command = command;
         server.args = args;

@@ -68,6 +68,7 @@ program
     "Reject unauthorized SSL certificates",
     "true"
   )
+  .option("--debug", "Enable verbose debug logging from MCP servers", false)
   .action(async (options) => {
     try {
       // Validate required options
@@ -86,6 +87,8 @@ program
         apiKey: options.apiKey,
         toolbeltUrl: options.toolbeltUrl,
         rejectUnauthorized: options.rejectUnauthorized !== "false",
+        logLevel: options.debug ? "debug" : "info",
+        debug: options.debug,
       });
 
       // Handle process termination
@@ -136,6 +139,7 @@ program
     "Reject unauthorized SSL certificates",
     "true"
   )
+  .option("--debug", "Enable verbose debug logging from MCP servers", false)
   .action(async (serverPackage, options) => {
     try {
       // Validate required options
@@ -155,6 +159,8 @@ program
         apiKey: options.apiKey,
         toolbeltUrl: options.toolbeltUrl,
         rejectUnauthorized: options.rejectUnauthorized !== "false",
+        logLevel: options.debug ? "debug" : "info",
+        debug: options.debug,
       });
 
       // Start the bridge
@@ -187,7 +193,7 @@ program
 
       if (options.transportType === "stdio") {
         // Run the MCP server with stdio transport
-        console.log(`Running server with stdio transport: ${serverPackage}`);
+        console.log(`Starting ${serverPackage} with stdio transport`);
 
         // Create a server instance that will be registered with the bridge
         const serverName = serverPackage.split("/").pop() || "mcp-server";
@@ -231,20 +237,17 @@ program
         try {
           // Connect to the server via the client
           await mcpClient.connect(transport);
-          console.log(`MCP client connected to ${serverName} via stdio`);
+          console.log(`Connected to ${serverName}`);
 
           // Get the process now
           serverProcess = transport.process;
 
-          // Add handlers for logging
+          // Add handlers for logging - simple output handling
           if (serverProcess && serverProcess.stdout) {
             serverProcess.stdout.on("data", (data) => {
               const output = data.toString().trim();
-              if (output) {
-                console.log(
-                  "Server stdout:",
-                  output.substring(0, 200) + (output.length > 200 ? "..." : "")
-                );
+              if (output && options.debug) {
+                console.log(`${serverName}: ${output}`);
               }
             });
           }
@@ -253,10 +256,7 @@ program
             serverProcess.stderr.on("data", (data) => {
               const output = data.toString().trim();
               if (output) {
-                console.error(
-                  "Server stderr:",
-                  output.substring(0, 200) + (output.length > 200 ? "..." : "")
-                );
+                console.error(`${serverName}: ${output}`);
               }
             });
           }
@@ -264,10 +264,15 @@ program
           // Try to list tools immediately to check the connection
           try {
             toolsList = await mcpClient.listTools();
-            console.log(`Successfully listed tools from ${serverName}`);
+            const toolCount = Array.isArray(toolsList)
+              ? toolsList.length
+              : toolsList.tools
+                ? toolsList.tools.length
+                : 0;
+            console.log(`${serverName}: ${toolCount} tools available`);
           } catch (toolError) {
             console.log(
-              `Could not list tools from ${serverName} yet: ${toolError.message}`
+              `${serverName}: Could not list tools yet - ${toolError.message}`
             );
           }
 
@@ -292,15 +297,9 @@ program
 
             // Connect to the server
             connect: async (bridgeTransport) => {
-              console.log(`Connecting to ${serverName} via stdio`);
-
               // Create a sendRequest function and attach it to the transport
               bridgeTransport.sendRequest = async (request) => {
                 try {
-                  console.log(
-                    `Sending request to ${serverName}: ${JSON.stringify(request)}`
-                  );
-
                   // Convert the bridge request format to MCP client format
                   let result;
 
@@ -308,9 +307,6 @@ program
                     request.method === "tools/list" ||
                     request.type === "list_tools"
                   ) {
-                    console.log(
-                      `Using mcpClient.listTools() for ${serverName}`
-                    );
                     result = await mcpClient.listTools();
                     return { tools: result };
                   } else if (
@@ -319,32 +315,25 @@ program
                   ) {
                     // Handle tool call
                     const toolName = request.method.split("/")[1];
-                    console.log(`Using mcpClient.callTool() for ${toolName}`);
                     result = await mcpClient.callTool({
                       name: toolName,
                       arguments: request.params || {},
                     });
                     return { result };
                   } else if (request.type === "call_tool") {
-                    console.log(
-                      `Using mcpClient.callTool() for ${request.name}`
-                    );
                     result = await mcpClient.callTool({
                       name: request.name,
                       arguments: request.arguments || {},
                     });
                     return { result };
                   } else {
-                    console.log(
-                      `Unknown request type, passing through: ${JSON.stringify(request)}`
-                    );
                     throw new Error(
                       `Unsupported request type: ${request.method || request.type}`
                     );
                   }
                 } catch (error) {
                   console.error(
-                    `Error handling request to ${serverName}: ${error.message}`
+                    `${serverName} request failed: ${error.message}`
                   );
                   throw error;
                 }
@@ -360,13 +349,12 @@ program
 
             // Disconnect from the server
             disconnect: async () => {
-              console.log(`Disconnecting from ${serverName}`);
               try {
                 await mcpClient.disconnect();
-                console.log(`MCP client disconnected from ${serverName}`);
+                console.log(`${serverName}: Disconnected`);
               } catch (error) {
                 console.error(
-                  `Error disconnecting MCP client from ${serverName}: ${error.message}`
+                  `${serverName}: Disconnect error - ${error.message}`
                 );
               }
             },
@@ -374,7 +362,7 @@ program
 
           // Register the server with the bridge
           await bridge.registerServer(server);
-          console.log(`Registered server ${serverName} with bridge`);
+          console.log(`${serverName}: Registered with bridge`);
         } catch (error) {
           console.error(
             `Error connecting MCP client to ${serverName}: ${error.message}`

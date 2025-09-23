@@ -1,5 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import fs from "fs";
+import path from "path";
+import { spawn } from "child_process";
 
 /**
  * Create a stdio-based MCP server
@@ -22,12 +25,26 @@ export async function createStdioServer(config) {
     description,
     authType = "none",
     env,
+    debug = false,
   } = config;
 
   const serverName = name;
 
-  console.log(`Creating stdio server: ${serverName}`);
-  console.log(`Command: ${command} ${args.join(" ")}`);
+  console.log(`Creating ${serverName}: ${command} ${args.join(" ")}`);
+
+  // Create logs directory if it doesn't exist
+  const logsDir = path.join(process.cwd(), "logs");
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
+
+  // Create log file paths
+  const logFile = path.join(logsDir, `${serverName}.log`);
+  const errorLogFile = path.join(logsDir, `${serverName}.error.log`);
+
+  if (!debug) {
+    console.log(`${serverName}: Logs will be written to ${logFile}`);
+  }
 
   // For npx commands, add -y to make it non-interactive
   let finalArgs = args;
@@ -35,12 +52,13 @@ export async function createStdioServer(config) {
     finalArgs = ["-y", ...args];
   }
 
-  // Create the transport
+  // Create the transport with proper stdio isolation
   const transport = new StdioClientTransport({
     command: command,
     args: finalArgs,
-    options,
+    stderr: "pipe", // Force stderr to be piped instead of inherited
     env: env ? { ...process.env, ...env } : undefined,
+    ...options,
   });
 
   // Create the MCP client
@@ -61,24 +79,34 @@ export async function createStdioServer(config) {
   try {
     // Connect to the server via the client
     await mcpClient.connect(transport);
-    console.log(`MCP client connected to ${serverName} via stdio`);
+    console.log(`${serverName}: Connected via stdio`);
   } catch (error) {
-    console.error(`Error connecting to MCP server via stdio: ${error.message}`);
+    console.error(`${serverName}: Connection failed - ${error.message}`);
     throw error;
   }
 
-  // Get the process
-  const serverProcess = transport.process;
+  // Get the process after connecting - try accessing private property
+  const serverProcess = transport.process || transport._process;
 
-  // Add handlers for logging
+  // Add handlers for logging - redirect to log files
   if (serverProcess && serverProcess.stdout) {
     serverProcess.stdout.on("data", (data) => {
       const output = data.toString().trim();
       if (output) {
-        console.log(
-          `[${serverName}] stdout:`,
-          output.substring(0, 200) + (output.length > 200 ? "..." : "")
-        );
+        // Always log to file
+        const timestamp = new Date().toISOString();
+        try {
+          fs.appendFileSync(logFile, `[${timestamp}] ${output}\n`);
+        } catch (error) {
+          console.error(
+            `Failed to write to log file ${logFile}: ${error.message}`
+          );
+        }
+
+        // Only show in console if debug mode is enabled
+        if (debug) {
+          console.log(`${serverName}: ${output}`);
+        }
       }
     });
   }
@@ -87,10 +115,14 @@ export async function createStdioServer(config) {
     serverProcess.stderr.on("data", (data) => {
       const output = data.toString().trim();
       if (output) {
-        console.error(
-          `[${serverName}] stderr:`,
-          output.substring(0, 200) + (output.length > 200 ? "..." : "")
-        );
+        // Log stderr to error file only
+        const timestamp = new Date().toISOString();
+        fs.appendFileSync(errorLogFile, `[${timestamp}] ${output}\n`);
+
+        // Only show errors in console if debug mode is enabled
+        if (debug) {
+          console.error(`${serverName}: ${output}`);
+        }
       }
     });
   }
@@ -99,10 +131,15 @@ export async function createStdioServer(config) {
   let toolsList = [];
   try {
     toolsList = await mcpClient.listTools();
-    console.log(`Successfully listed tools from ${serverName}`);
+    const toolCount = Array.isArray(toolsList)
+      ? toolsList.length
+      : toolsList.tools
+        ? toolsList.tools.length
+        : 0;
+    console.log(`${serverName}: ${toolCount} tools available`);
   } catch (toolError) {
     console.log(
-      `Could not list tools from ${serverName} yet: ${toolError.message}`
+      `${serverName}: Could not list tools yet - ${toolError.message}`
     );
   }
 
@@ -131,15 +168,9 @@ export async function createStdioServer(config) {
 
     // Connect to the server
     connect: async (bridgeTransport) => {
-      console.log(`Connecting to ${serverName} via stdio`);
-
       // Create a sendRequest function and attach it to the transport
       bridgeTransport.sendRequest = async (request) => {
         try {
-          console.log(
-            `Sending request to ${serverName}: ${JSON.stringify(request)}`
-          );
-
           // Convert the bridge request format to MCP client format
           let result;
 
@@ -147,37 +178,29 @@ export async function createStdioServer(config) {
             request.method === "tools/list" ||
             request.type === "list_tools"
           ) {
-            console.log(`Using mcpClient.listTools() for ${serverName}`);
             result = await mcpClient.listTools();
             return { tools: result };
           } else if (request.method && request.method.startsWith("tools/")) {
             // Handle tool call
             const toolName = request.method.split("/")[1];
-            console.log(`Using mcpClient.callTool() for ${toolName}`);
             result = await mcpClient.callTool({
               name: toolName,
               arguments: request.params || {},
             });
             return { result };
           } else if (request.type === "call_tool") {
-            console.log(`Using mcpClient.callTool() for ${request.name}`);
             result = await mcpClient.callTool({
               name: request.name,
               arguments: request.arguments || {},
             });
             return { result };
           } else {
-            console.log(
-              `Unknown request type, passing through: ${JSON.stringify(request)}`
-            );
             throw new Error(
               `Unsupported request type: ${request.method || request.type}`
             );
           }
         } catch (error) {
-          console.error(
-            `Error handling request to ${serverName}: ${error.message}`
-          );
+          console.error(`${serverName} request failed: ${error.message}`);
           throw error;
         }
       };
@@ -192,19 +215,16 @@ export async function createStdioServer(config) {
 
     // Disconnect from the server
     disconnect: async () => {
-      console.log(`Disconnecting from ${serverName}`);
       try {
         await mcpClient.disconnect();
-        console.log(`MCP client disconnected from ${serverName}`);
+        console.log(`${serverName}: Disconnected`);
 
         if (serverProcess && !serverProcess.killed) {
           serverProcess.kill();
-          console.log(`Process for ${serverName} terminated`);
+          console.log(`${serverName}: Process terminated`);
         }
       } catch (error) {
-        console.error(
-          `Error disconnecting MCP client from ${serverName}: ${error.message}`
-        );
+        console.error(`${serverName}: Disconnect error - ${error.message}`);
       }
     },
   };
