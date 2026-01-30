@@ -43,7 +43,7 @@ export async function createStdioServer(config) {
   const errorLogFile = path.join(logsDir, `${serverName}.error.log`);
 
   if (!debug) {
-    console.log(`${serverName}: Logs will be written to ${logFile}`);
+    console.log(`${serverName}: Logs will be written to "${logFile}"`);
   }
 
   // For npx commands, add -y to make it non-interactive
