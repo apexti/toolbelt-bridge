@@ -81,14 +81,15 @@ program
 
       console.log("Starting MCP Bridge...");
       console.log(`Toolbelt URL: ${options.toolbeltUrl}`);
+      console.log(`Log level: ${process.env.LOG_LEVEL || (options.debug ? 'debug' : 'info')} (${options.debug ? 'from --debug flag' : process.env.LOG_LEVEL ? 'from LOG_LEVEL env var' : 'default'})`);
 
       // Create and start the bridge
       const bridge = new McpBridgeServer({
         apiKey: options.apiKey,
         toolbeltUrl: options.toolbeltUrl,
         rejectUnauthorized: options.rejectUnauthorized !== "false",
-        logLevel: options.debug ? "debug" : "info",
-        debug: options.debug,
+        logLevel: process.env.LOG_LEVEL || (options.debug ? "debug" : "info"),
+        debug: options.debug || process.env.LOG_LEVEL === 'debug',
       });
 
       // Handle process termination
@@ -159,8 +160,8 @@ program
         apiKey: options.apiKey,
         toolbeltUrl: options.toolbeltUrl,
         rejectUnauthorized: options.rejectUnauthorized !== "false",
-        logLevel: options.debug ? "debug" : "info",
-        debug: options.debug,
+        logLevel: process.env.LOG_LEVEL || (options.debug ? "debug" : "info"),
+        debug: options.debug || process.env.LOG_LEVEL === 'debug',
       });
 
       // Start the bridge
