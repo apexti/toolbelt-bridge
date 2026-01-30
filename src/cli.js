@@ -55,7 +55,7 @@ program
   .option(
     "-t, --toolbelt-url <url>",
     "Toolbelt bridge URL",
-    process.env.TOOLBELT_URL || "wss://yourtoolbelt.app/bridge"
+    process.env.TOOLBELT_URL || "wss://toolbelt.apexti.dev/bridge"
   )
   .option(
     "-s, --server-adapter",
@@ -126,7 +126,7 @@ program
   .option(
     "-t, --toolbelt-url <url>",
     "Toolbelt bridge URL",
-    process.env.TOOLBELT_URL || "wss://yourtoolbelt.app/bridge"
+    process.env.TOOLBELT_URL || "wss://toolbelt.apexti.dev/bridge"
   )
   .option("-a, --args <args>", "Additional arguments to pass to the server", "")
   .option(
