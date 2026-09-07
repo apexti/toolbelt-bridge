@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Toolbelt Bridge</title>
+    <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --ok: #16a34a;
+      --warn: #d97706;
+      --bad: #dc2626;
+      --chip: #eef2ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1115;
+        --panel: #171a21;
+        --text: #e5e7eb;
+        --muted: #9ca3af;
+        --border: #2a2f3a;
+        --chip: #1f2937;
+      }
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    header h1 {
+      font-size: 16px;
+      margin: 0;
+    }
+    header .meta {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    header .spacer {
+      flex: 1;
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      gap: 18px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    section h2 {
+      font-size: 14px;
+      margin: 0 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    section h2 .count {
+      color: var(--muted);
+      font-weight: normal;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th,
+    td {
+      text-align: left;
+      padding: 8px 6px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 12px;
+    }
+    tr:last-child td {
+      border-bottom: 0;
+    }
+    code,
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      background: var(--muted);
+    }
+    .dot.ok {
+      background: var(--ok);
+    }
+    .dot.warn {
+      background: var(--warn);
+    }
+    .dot.bad {
+      background: var(--bad);
+    }
+    .muted {
+      color: var(--muted);
+    }
+    .small {
+      font-size: 12px;
+    }
+    button {
+      font: inherit;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+    }
+    button:hover {
+      border-color: var(--accent);
+    }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    button.danger {
+      color: var(--bad);
+    }
+    button:disabled {
+      opacity: .5;
+      cursor: default;
+    }
+    input,
+    select,
+    textarea {
+      font: inherit;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      width: 100%;
+    }
+    textarea {
+      min-height: 64px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+    }
+    form.grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      align-items: end;
+      margin-top: 10px;
+    }
+    form.grid label {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--chip);
+      font-size: 12px;
+    }
+    .chip input {
+      width: auto;
+      margin: 0;
+    }
+    .empty {
+      color: var(--muted);
+      padding: 12px 0;
+    }
+    .banner {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--chip);
+      margin-bottom: 12px;
+    }
+    .banner.bad {
+      background: color-mix(in srgb, var(--bad) 12%, transparent);
+    }
+    pre.logs {
+      max-height: 320px;
+      overflow: auto;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      margin: 0;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    details summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .toast {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      background: var(--text);
+      color: var(--bg);
+      padding: 10px 14px;
+      border-radius: 8px;
+      opacity: 0;
+      transition: opacity .2s;
+      pointer-events: none;
+    }
+    .toast.show {
+      opacity: 1;
+    }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Toolbelt Bridge</h1>
+      <span class="meta" id="meta"></span>
+      <span class="spacer"></span>
+      <span class="small muted" id="conn-summary"></span>
+    </header>
+    <main id="app">
+      <div class="empty">Connecting to the bridge…</div>
+    </main>
+    <div class="toast" id="toast"></div>
+    <script>
+    window.BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
+    </script>
+    <script src="/app.js"></script>
+  </body>
+</html>

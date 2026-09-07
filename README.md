@@ -1,127 +1,90 @@
-# Toolbelt MCP Bridge
+# Toolbelt Bridge
 
-The Toolbelt MCP Bridge allows you to run MCP (Model Context Protocol) servers locally on your machine while connecting them to your Toolbelt account. This enables you to:
+Run MCP servers and local LLM runtimes (Ollama, LM Studio, vLLM, or any OpenAI-compatible
+server) on your own machine and use them from
+[Toolbelt](https://github.com/apexti/toolbelt) — per organization, with nothing on your
+machine exposed to the internet.
 
-1. Run private MCP servers that don't need to be hosted in the cloud
-2. Develop and test new MCP servers locally before deployment
-3. Use specialized MCP servers that require local resources
-4. Maintain control over your data and services
+The bridge is a single native binary (built with Deno) with a small local web UI at
+http://127.0.0.1:4747.
 
-## Installation
+## Install
 
-```bash
-# Clone the repository (if you haven't already)
-git clone https://github.com/yourusername/toolbelt.git
-cd toolbelt/mcp-bridge
+Download the latest release for your platform from the **Releases** page (or from Toolbelt
+→ Bridges → _Download bridge_):
 
-# Install dependencies
-npm install
-```
-
-## Configuration
-
-Create a `.env` file in the mcp-bridge directory with the following variables:
-
-```
-TOOLBELT_URL=wss://toolbelt.apexti.dev/bridge
-API_KEY=your-api-key
-```
-
-You can get your API Key from your Toolbelt account settings.
-
-## Usage
-
-### Starting the Bridge
+| Platform            | File                              |
+| ------------------- | --------------------------------- |
+| Linux x64           | `toolbelt-bridge-linux-x64`       |
+| macOS Apple Silicon | `toolbelt-bridge-macos-arm64`     |
+| macOS Intel         | `toolbelt-bridge-macos-x64`       |
+| Windows x64         | `toolbelt-bridge-windows-x64.exe` |
 
 ```bash
-npm start server
+chmod +x toolbelt-bridge-linux-x64
+./toolbelt-bridge-linux-x64            # starts the bridge and opens the local UI
 ```
 
-This will start the bridge and connect to your Toolbelt account. Any MCP servers you register with the bridge will be available in your Toolbelt account.
+macOS: the binaries are not notarized yet, so the first launch needs
+`xattr -d com.apple.quarantine ./toolbelt-bridge-macos-arm64`.
 
-### Running External MCP Servers
+Verify downloads against `sha256sums.txt` attached to each release.
 
-The bridge supports several ways to run external MCP servers:
+## Pair with an organization
 
-#### 1. Run an MCP Server with npx
+1. In Toolbelt open **Bridges → Pair a bridge** in the organization you want (or your
+   personal space). You get a code and a pair URL, valid for ten minutes.
+2. Paste the URL into the bridge's local UI, or run
+   `toolbelt-bridge pair "https://toolbelt.example.com/bridge/pair?code=ABC123"`.
 
-You can run any MCP server package directly with the bridge:
+A bridge can be paired with several organizations. Each MCP server and each local model is
+exposed to exactly the organizations you tick in the local UI. Inside an organization,
+what you expose is visible only to you until you share it from Toolbelt's Bridges page.
 
-```bash
-# Run with stdio transport (for servers that communicate via standard I/O)
-npm run mcp-bridge run @modelcontextprotocol/server-memory --transport-type stdio
+## MCP servers
 
-# Run with additional arguments
-npm run mcp-bridge run @modelcontextprotocol/server-memory -- -a "--port=3000"
+Add a server in the local UI (command, arguments, environment, working directory, icon).
+Servers launched with `npx` need Node.js on this machine; Python servers via `uvx` need
+[uv](https://docs.astral.sh/uv/). The _Prerequisites_ panel shows what was found.
 
-# Disable SSL verification for development with local HTTPS servers
-npm run mcp-bridge run @modelcontextprotocol/server-memory --reject-unauthorized false
+Servers auto-restart after a crash (up to five times in ten minutes) and their output is
+written to `<config dir>/logs/<server>.log`.
+
+## Local models
+
+The bridge probes Ollama (`:11434`), LM Studio (`:1234`) and vLLM (`:8000`) every 30
+seconds and lists the models it finds. Tick the organizations a model should be available
+in; it then appears in that organization's model picker under **Organization Models**, and
+chat requests are tunnelled through the bridge's WebSocket to the runtime. Other
+OpenAI-compatible servers can be added with their base URL and an optional API key.
+
+## Command line
+
+```
+toolbelt-bridge [serve] [--headless] [--port 4747] [--config <path>]
+toolbelt-bridge pair <code|url> [--server https://toolbelt.example.com]
+toolbelt-bridge status
+toolbelt-bridge version
 ```
 
-This will:
-
-1. Start the bridge
-2. Start a server adapter (for WebSocket transport)
-3. Run the specified MCP server package with npx
-4. Connect the server to the bridge
-
-#### 2. Start a Server Adapter
-
-If you want to run multiple MCP servers or have more control over how they're started:
-
-```bash
-# Start a server adapter on a random port
-npm run mcp-bridge server
-
-# Start a server adapter on a specific port
-npm run mcp-bridge server -p 8080
-```
-
-This will start the bridge and a server adapter. You'll see a connection URL that you can use to connect your MCP servers to the bridge.
-
-#### 3. Start the Bridge with a Server Adapter
-
-You can also start the bridge with a server adapter in one command:
-
-```bash
-npm run mcp-bridge start -s
-```
-
-### Using with Custom MCP Servers
-
-You can register custom MCP servers with the bridge programmatically:
-
-```javascript
-import { McpBridgeServer } from "@toolbelt/mcp-bridge";
-import { YourCustomMcpServer } from "./your-custom-server.js";
-
-// Create and initialize your MCP server
-const customServer = new YourCustomMcpServer();
-await customServer.initialize();
-
-// Create and start the bridge
-const bridge = new McpBridgeServer({
-  apiKey: "your-api-key",
-  toolbeltUrl: "wss://yourtoolbelt.app/bridge",
-});
-
-// Start the bridge
-await bridge.start();
-
-// Register your custom server with the bridge
-await bridge.registerServer(customServer);
-
-console.log(`${customServer.name} registered with the bridge`);
-```
+Config lives in `~/.config/toolbelt-bridge/config.json` (Linux),
+`~/Library/Application Support/toolbelt-bridge/config.json` (macOS) or
+`%APPDATA%\toolbelt-bridge\config.json` (Windows), mode 0600 — it contains the bridge
+tokens. `TOOLBELT_BRIDGE_CONFIG` overrides the path. A v1 `settings.json` from the Node
+bridge is migrated automatically when passed as `--config`.
 
 ## Development
 
-For development with auto-restart on file changes:
+Requires [Deno](https://deno.com) 2.x.
 
 ```bash
-npm run dev
+deno task dev                # run from source
+deno task test
+deno task check              # type-check, lint, fmt
+deno task compile:linux      # dist/toolbelt-bridge-linux-x64 (see scripts/compile.ts)
 ```
 
-## License
+Releases are built by GitHub Actions on `v*` tags for all four targets, with
+`sha256sums.txt`. Bump `src/version.ts` and `deno.json` before tagging.
 
-MIT
+The wire protocol is documented in Toolbelt's `docs/bridge-protocol-v2.md`.
