@@ -10,6 +10,7 @@ import type { LlmRegistry } from "../llm/runtimes.ts";
 import type { ConnectionManager } from "../connections/manager.ts";
 import { checkPrerequisites, type PrereqStatus } from "../mcp/prereqs.ts";
 import { VERSION } from "../version.ts";
+import { RegistryClient } from "../registry.ts";
 
 export interface UiDeps {
   store: ConfigStore;
@@ -67,6 +68,7 @@ export async function startUiServer(deps: UiDeps): Promise<UiServer> {
     notify();
   }).catch(() => {});
 
+  const registry = new RegistryClient();
   const sseClients = new Set<(event: string, data: unknown) => void>();
   let notifyTimer: ReturnType<typeof setTimeout> | null = null;
   const notify = () => {
@@ -142,6 +144,11 @@ export async function startUiServer(deps: UiDeps): Promise<UiServer> {
     }
     if (method === "GET" && path === "/app.js") {
       return new Response(await readAsset("app.js"), {
+        headers: { "content-type": "text/javascript; charset=utf-8" },
+      });
+    }
+    if (method === "GET" && path === "/registry-plan.js") {
+      return new Response(await readAsset("registry-plan.js"), {
         headers: { "content-type": "text/javascript; charset=utf-8" },
       });
     }
@@ -265,6 +272,27 @@ export async function startUiServer(deps: UiDeps): Promise<UiServer> {
       }
       if (!seg[2] && method === "GET") {
         return json({ runtimes: llm.runtimes(), models: store.config.llm.models });
+      }
+    }
+
+    if (seg[1] === "registry" && method === "GET") {
+      try {
+        if (seg[2] === "servers" && !seg[3]) {
+          return json(
+            await registry.search({
+              search: url.searchParams.get("search") || "",
+              cursor: url.searchParams.get("cursor") || "",
+              limit: Number(url.searchParams.get("limit") || 30),
+            }),
+          );
+        }
+        if (seg[2] === "servers" && seg[3]) {
+          const name = decodeURIComponent(seg.slice(3).join("/"));
+          return json(await registry.getServer(name));
+        }
+      } catch (error) {
+        const status = (error as { status?: number }).status || 502;
+        return json({ error: (error as Error).message }, status);
       }
     }
 

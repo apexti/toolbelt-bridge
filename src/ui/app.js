@@ -1,4 +1,12 @@
 /* Toolbelt Bridge local UI — dependency-free. State arrives over SSE. */
+import {
+  buildInstallOptions,
+  formatCommand,
+  missingRequiredInputs,
+  resolveInstallOption,
+  summarizeServer,
+} from "/registry-plan.js";
+
 (() => {
   const TOKEN = globalThis.BRIDGE_TOKEN;
   const app = document.getElementById("app");
@@ -6,6 +14,7 @@
   let state = null;
   const logs = [];
   const ui = { logSource: "", showLogs: true, expanded: new Set() };
+  const reg = { open: false, query: "", results: [], nextCursor: null, loading: false, error: null, selected: null, options: [], optionId: null, values: {}, serverKey: "", orgs: [] };
 
   const esc = (v) =>
     String(v ?? "").replace(
@@ -208,10 +217,100 @@
         <label><span>Auto-start</span><select name="autoStart"><option value="true">yes</option><option value="false">no</option></select></label>
         <button class="primary" type="submit">Add server</button>
       </form></details>
+      ${renderRegistry()}
     </section>`;
   }
 
-  function renderModels() {
+  const TYPE_LABELS = { npm: "npm", pypi: "PyPI", oci: "Docker", nuget: "NuGet", mcpb: "MCPB" };
+
+  function renderRegistry() {
+    if (!reg.open) {
+      return `<div style="margin-top:10px"><button data-act="reg-open">Browse the MCP registry…</button> <span class="small muted">Find servers on the official registry and add them here.</span></div>`;
+    }
+    if (reg.selected) return renderRegistryDetail();
+    const rows = reg.results.map((e, i) => `
+      <tr>
+        <td><b>${esc(e.title)}</b> <span class="small muted">${esc(e.name)}</span><div class="small muted">${esc(e.description)}</div></td>
+        <td class="small">${e.registryTypes.map((t) => `<span class="chip">${esc(TYPE_LABELS[t] || t)}</span>`).join(" ")}${e.hasRemote ? ' <span class="chip">remote</span>' : ""}</td>
+        <td><button data-act="reg-select" data-index="${i}" ${e.hasPackage ? "" : "disabled title=\"No runnable package; connect it as a Remote MCP from Toolbelt\""}>Choose</button></td>
+      </tr>`).join("");
+    return `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+      <div class="row"><b>MCP registry</b><span class="spacer" style="flex:1"></span><button data-act="reg-close">Close</button></div>
+      <form class="grid" id="reg-search" style="grid-template-columns:1fr auto"><label>Search<input name="q" value="${esc(reg.query)}" placeholder="github, postgres, filesystem…" /></label><button class="primary" type="submit" ${reg.loading ? "disabled" : ""}>Search</button></form>
+      ${reg.error ? `<div class="small" style="color:var(--bad)">${esc(reg.error)}</div>` : ""}
+      ${rows ? `<table><thead><tr><th>Server</th><th>Packages</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${reg.loading ? "Searching…" : "No results yet."}</div>`}
+      ${reg.nextCursor ? `<button data-act="reg-more" ${reg.loading ? "disabled" : ""}>Load more</button>` : ""}
+      <p class="small muted">Listings come from the official MCP Registry. Review a server's repository before running it; packages run on this machine.</p>
+    </div>`;
+  }
+
+  function regOption() {
+    return reg.options.find((o) => o.id === reg.optionId) || null;
+  }
+
+  function regPreview(option) {
+    try {
+      return formatCommand(resolveInstallOption(option, reg.values));
+    } catch {
+      const filler = Object.fromEntries(missingRequiredInputs(option, reg.values).map((i) => [i.key, `<${i.label}>`]));
+      try { return formatCommand(resolveInstallOption(option, { ...filler, ...reg.values })); } catch { return ""; }
+    }
+  }
+
+  function renderRegistryDetail() {
+    const e = reg.selected;
+    const option = regOption();
+    const inputs = option ? option.inputs.map((inp) => {
+      const v = reg.values[inp.key] ?? "";
+      const label = `${esc(inp.label)}${inp.isRequired ? " *" : ""}`;
+      if (inp.choices && inp.choices.length) return `<label>${label}<select data-reg-input="${esc(inp.key)}">${inp.choices.map((c) => `<option ${((v || inp.default) === c) ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><span class="muted">${esc(inp.description)}</span></label>`;
+      if (inp.format === "boolean") return `<label><span>${label}</span><select data-reg-input="${esc(inp.key)}"><option value="false" ${/^(true|1|yes)$/i.test(v || inp.default || "") ? "" : "selected"}>no</option><option value="true" ${/^(true|1|yes)$/i.test(v || inp.default || "") ? "selected" : ""}>yes</option></select></label>`;
+      return `<label>${label}<input data-reg-input="${esc(inp.key)}" type="${inp.isSecret ? "password" : "text"}" value="${esc(v)}" placeholder="${esc(inp.placeholder || inp.default || "")}" /><span class="muted">${esc(inp.description)}</span></label>`;
+    }).join("") : "";
+    const missing = option ? missingRequiredInputs(option, reg.values) : [];
+    return `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+      <div class="row"><button data-act="reg-back">← Back</button><b>${esc(e.title)}</b> <span class="small muted">${esc(e.name)}</span>${e.repository ? ` <a class="small" href="${esc(e.repository)}" target="_blank" rel="noopener">repository</a>` : ""}</div>
+      <div class="small muted" style="margin:6px 0">${esc(e.description)}</div>
+      ${reg.options.map((o) => `<label class="row" style="margin:4px 0;${o.supported ? "" : "opacity:.6"}"><input type="radio" name="reg-option" value="${esc(o.id)}" ${o.id === reg.optionId ? "checked" : ""} ${o.supported ? "" : "disabled"} /> <span>${esc(o.label)} <span class="small muted">${esc(o.supported ? `needs ${o.prerequisite}` : o.unsupportedReason)}</span></span></label>`).join("")}
+      ${option ? `<form class="grid" id="reg-install">
+        ${inputs}
+        <label>Server key<input name="serverKey" value="${esc(reg.serverKey)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" required /></label>
+        <label>Expose to ${orgChips(reg.orgs, "reg-orgs")}</label>
+        <label class="full" style="grid-column:1/-1"><span>Command</span><code class="mono" style="display:block;padding:6px;background:var(--bg);border-radius:6px">${esc(regPreview(option))}</code></label>
+        <button class="primary" type="submit" ${missing.length ? "disabled" : ""}>Add server</button>
+        ${missing.length ? `<span class="small muted">Required: ${esc(missing.map((m) => m.label).join(", "))}</span>` : ""}
+      </form>` : ""}
+    </div>`;
+  }
+
+  async function regSearch(more = false) {
+    reg.loading = true; reg.error = null; render();
+    try {
+      const params = new URLSearchParams({ limit: "30" });
+      if (reg.query.trim()) params.set("search", reg.query.trim());
+      if (more && reg.nextCursor) params.set("cursor", reg.nextCursor);
+      const data = await api("GET", `/api/registry/servers?${params}`);
+      const entries = (data.servers || []).map((s) => ({ ...summarizeServer(s), raw: s }));
+      reg.results = more ? [...reg.results, ...entries] : entries;
+      reg.nextCursor = data.nextCursor || null;
+    } catch (e) { reg.error = e.message; } finally { reg.loading = false; render(); }
+  }
+
+  async function regSelect(entry) {
+    reg.selected = entry; reg.options = []; reg.optionId = null; reg.values = {}; reg.orgs = []; render();
+    try {
+      const detail = await api("GET", `/api/registry/servers/${encodeURIComponent(entry.name)}`);
+      reg.options = buildInstallOptions(detail).filter((o) => o.kind === "package");
+      const first = reg.options.find((o) => o.supported);
+      reg.optionId = first ? first.id : null;
+      reg.serverKey = first ? regDefaultKey(first) : "";
+    } catch (e) { reg.error = e.message; }
+    render();
+  }
+
+  function regDefaultKey(option) {
+    try { return resolveInstallOption(option, Object.fromEntries(option.inputs.map((i) => [i.key, "x"]))).serverKey; } catch { return "server"; }
+  }
     const runtimes = state.llm.runtimes;
     const exposure = state.llm.models || {};
     const blocks = runtimes.map((r) => {
@@ -472,6 +571,31 @@
         allowRemoteServerCreate: fd.get("allowRemoteServerCreate") === "true",
       });
       toast("Saved");
+    });
+    app.querySelectorAll("button[data-act^='reg-']").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        const a = btn.dataset.act;
+        if (a === "reg-open") { reg.open = true; render(); if (!reg.results.length) regSearch(); }
+        else if (a === "reg-close") { reg.open = false; reg.selected = null; render(); }
+        else if (a === "reg-back") { reg.selected = null; render(); }
+        else if (a === "reg-more") regSearch(true);
+        else if (a === "reg-select") regSelect(reg.results[Number(btn.dataset.index)]);
+      });
+    });
+    form("reg-search", async (fd) => { reg.query = String(fd.get("q") || ""); await regSearch(); });
+    app.querySelectorAll("input[name='reg-option']").forEach((r) => r.addEventListener("change", () => {
+      reg.optionId = r.value; reg.values = {}; const o = regOption(); reg.serverKey = o ? regDefaultKey(o) : ""; render();
+    }));
+    app.querySelectorAll("[data-reg-input]").forEach((el) => el.addEventListener("input", () => { reg.values[el.dataset.regInput] = el.value; const code = app.querySelector("#reg-install code"); const o = regOption(); if (code && o) code.textContent = regPreview(o); }));
+    app.querySelectorAll("[data-reg-input]").forEach((el) => el.addEventListener("change", () => { reg.values[el.dataset.regInput] = el.value; }));
+    app.querySelectorAll("input[name='reg-orgs']").forEach((box) => box.addEventListener("change", () => { reg.orgs = [...app.querySelectorAll("input[name='reg-orgs']:checked")].map((b) => b.dataset.org); }));
+    form("reg-install", async (fd) => {
+      const option = regOption(); if (!option) return;
+      const resolved = resolveInstallOption(option, reg.values);
+      const key = String(fd.get("serverKey") || resolved.serverKey).trim();
+      await api("PUT", `/api/servers/${encodeURIComponent(key)}`, { command: resolved.command, args: resolved.args, env: resolved.env, description: resolved.description || null, icon: reg.selected.icon || null, autoStart: true, orgs: reg.orgs });
+      toast(`Added ${key}`); reg.selected = null; reg.open = false; render();
     });
     const src = document.getElementById("log-source");
     if (src) {
