@@ -15,7 +15,7 @@ jobs:
           deno-version: v2.x
       - run: deno fmt --check
       - run: deno lint
-      - run: deno check src/main.ts
+      - run: deno check src/main.ts src/ui/app.js src/ui/registry-plan.js
       - run: deno task test
       - name: Compile smoke test
         run: |
