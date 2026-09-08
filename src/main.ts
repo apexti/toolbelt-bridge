@@ -18,6 +18,7 @@ import { ConnectionManager, currentBridgeInfo } from "./connections/manager.ts";
 import { claimPairing, orgConfigFromClaim, parsePairInput } from "./pairing.ts";
 import { startUiServer, uiTokenPath } from "./ui/server.ts";
 import { VERSION } from "./version.ts";
+import { spawnReplacement, Updater } from "./updater.ts";
 
 const HELP = `toolbelt-bridge ${VERSION}
 
@@ -25,6 +26,7 @@ Usage:
   toolbelt-bridge [serve] [options]      Run the bridge and its local UI
   toolbelt-bridge pair <code|url>        Pair with a Toolbelt organization
   toolbelt-bridge status                 Show paired orgs and connection state
+  toolbelt-bridge update                 Download and install the latest release
   toolbelt-bridge version
 
 Options:
@@ -81,7 +83,23 @@ async function serve(args: ReturnType<typeof parseArgs>): Promise<void> {
   const proxy = new LlmProxy(llm, log);
   const connections = new ConnectionManager(store, log, mcp, llm, proxy);
 
-  const ui = await startUiServer({ store, log, mcp, llm, connections });
+  await Updater.cleanupOldBinary();
+  let ui: Awaited<ReturnType<typeof startUiServer>> | null = null;
+  let stopForRestart: (() => Promise<void>) | null = null;
+  const updater = new Updater({
+    log,
+    restart: async () => {
+      log.info("update", "restarting into the new version");
+      await stopForRestart?.();
+      spawnReplacement();
+      await log.flush();
+      Deno.exit(0);
+    },
+    onChange: () => {
+      /* state is read on the next UI push */
+    },
+  });
+  ui = await startUiServer({ store, log, mcp, llm, connections, updater });
   llm.start();
   connections.start();
   await mcp.startAll();
@@ -96,17 +114,26 @@ async function serve(args: ReturnType<typeof parseArgs>): Promise<void> {
   if (!headless && store.config.ui.open) await openBrowser(ui.url);
 
   let shuttingDown = false;
-  const shutdown = async () => {
+  const stopEverything = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    log.info("bridge", "shutting down");
+    updater.stop();
     connections.stop();
     llm.stop();
     await mcp.stopAll();
-    await ui.close();
+    await ui?.close();
+  };
+  stopForRestart = stopEverything;
+  const shutdown = async () => {
+    log.info("bridge", "shutting down");
+    await stopEverything();
     await log.flush();
     Deno.exit(0);
   };
+  updater.start({
+    enabled: () => store.config.updates.check,
+    auto: () => store.config.updates.auto,
+  });
   Deno.addSignalListener("SIGINT", () => void shutdown());
   if (Deno.build.os !== "windows") {
     Deno.addSignalListener("SIGTERM", () => void shutdown());
@@ -160,6 +187,67 @@ async function pair(args: ReturnType<typeof parseArgs>): Promise<void> {
   );
 }
 
+async function update(args: ReturnType<typeof parseArgs>): Promise<void> {
+  const configPath = String(args.config || defaultConfigPath());
+  const store = await loadStore(configPath);
+  const log = new Logger({ level: "warn" });
+
+  // A running instance should do it, so it can restart itself afterwards.
+  try {
+    const token = (await Deno.readTextFile(uiTokenPath(configPath))).trim();
+    const base = `http://127.0.0.1:${store.config.ui.port}`;
+    const headers = { "content-type": "application/json", "x-bridge-token": token };
+    const checked = await (await fetch(`${base}/api/update/check`, {
+      method: "POST",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    })).json();
+    if (checked.error) throw new Error(checked.error);
+    if (!checked.updateAvailable) {
+      console.log(`Already up to date (${checked.currentVersion}).`);
+      return;
+    }
+    if (!checked.canSelfUpdate) {
+      console.log(
+        `${checked.latest?.tag} is available but cannot be installed automatically: ${checked.reason}`,
+      );
+      console.log(`Download: ${checked.latest?.url}`);
+      return;
+    }
+    await fetch(`${base}/api/update/apply`, {
+      method: "POST",
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
+    console.log(
+      `Installing ${checked.latest?.tag}; the running bridge will restart itself.`,
+    );
+    return;
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound) && !(error instanceof TypeError)) {
+      throw error;
+    }
+  }
+
+  const updater = new Updater({ log, restart: null });
+  const state = await updater.check();
+  if (state.error) throw new Error(state.error);
+  if (!state.updateAvailable) {
+    console.log(`Already up to date (${state.currentVersion}).`);
+    return;
+  }
+  if (!state.canSelfUpdate) {
+    console.log(
+      `${state.latest?.tag} is available but cannot be installed automatically: ${state.reason}`,
+    );
+    console.log(`Download: ${state.latest?.url}`);
+    return;
+  }
+  console.log(`Installing ${state.latest?.tag} over ${updater.execPath}…`);
+  const done = await updater.apply({ restart: false });
+  console.log(`Updated to ${done.installedVersion}. Start the bridge again to use it.`);
+}
+
 async function status(args: ReturnType<typeof parseArgs>): Promise<void> {
   const configPath = String(args.config || defaultConfigPath());
   const store = await loadStore(configPath);
@@ -172,6 +260,11 @@ async function status(args: ReturnType<typeof parseArgs>): Promise<void> {
     });
     const state = await response.json();
     console.log(`running: yes (UI at http://127.0.0.1:${store.config.ui.port})`);
+    if (state.update?.updateAvailable) {
+      console.log(
+        `update: ${state.update.latest?.tag} available (run: toolbelt-bridge update)`,
+      );
+    }
     for (const org of state.orgs || []) {
       console.log(
         `  ${org.orgName}: ${org.state}${
@@ -206,6 +299,7 @@ if (import.meta.main) {
     else if (command === "serve") await serve(args);
     else if (command === "pair") await pair(args);
     else if (command === "status") await status(args);
+    else if (command === "update") await update(args);
     else {
       console.error(`Unknown command "${command}"\n`);
       console.log(HELP);

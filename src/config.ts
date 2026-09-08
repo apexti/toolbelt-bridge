@@ -47,6 +47,7 @@ export interface BridgeConfig {
   name: string;
   ui: { port: number; open: boolean };
   allowRemoteServerCreate: boolean;
+  updates: { check: boolean; auto: boolean };
   orgs: OrgConnectionConfig[];
   mcpServers: Record<string, McpServerConfig>;
   llm: {
@@ -96,6 +97,7 @@ export function defaultConfig(): BridgeConfig {
     name: hostname(),
     ui: { port: DEFAULT_UI_PORT, open: true },
     allowRemoteServerCreate: true,
+    updates: { check: true, auto: false },
     orgs: [],
     mcpServers: {},
     llm: { runtimes: BUILTIN_RUNTIMES.map((r) => ({ ...r })), models: {} },
@@ -159,6 +161,7 @@ export function migrateConfig(raw: unknown): BridgeConfig {
       name: typeof cfg.name === "string" && cfg.name ? cfg.name : base.name,
       ui: { ...base.ui, ...(cfg.ui || {}) },
       allowRemoteServerCreate: cfg.allowRemoteServerCreate !== false,
+      updates: { ...base.updates, ...(cfg.updates || {}) },
       orgs: Array.isArray(cfg.orgs) ? cfg.orgs : [],
       mcpServers,
       llm: { runtimes: merged, models: cfg.llm?.models || {} },

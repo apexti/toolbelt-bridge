@@ -11,6 +11,7 @@ import type { ConnectionManager } from "../connections/manager.ts";
 import { checkPrerequisites, type PrereqStatus } from "../mcp/prereqs.ts";
 import { VERSION } from "../version.ts";
 import { RegistryClient } from "../registry.ts";
+import type { Updater } from "../updater.ts";
 
 export interface UiDeps {
   store: ConfigStore;
@@ -18,6 +19,7 @@ export interface UiDeps {
   mcp: McpManager;
   llm: LlmRegistry;
   connections: ConnectionManager;
+  updater?: Updater | null;
 }
 
 export interface UiServer {
@@ -51,7 +53,7 @@ async function readAsset(name: string): Promise<string> {
 }
 
 export async function startUiServer(deps: UiDeps): Promise<UiServer> {
-  const { store, log, mcp, llm, connections } = deps;
+  const { store, log, mcp, llm, connections, updater = null } = deps;
   const token = crypto.randomUUID().replace(/-/g, "") +
     crypto.randomUUID().replace(/-/g, "");
   const tokenPath = uiTokenPath(store.path);
@@ -99,6 +101,8 @@ export async function startUiServer(deps: UiDeps): Promise<UiServer> {
       platform: `${Deno.build.os}/${Deno.build.arch}`,
       ui: { port: cfg.ui.port, open: cfg.ui.open },
       allowRemoteServerCreate: cfg.allowRemoteServerCreate,
+      updates: cfg.updates,
+      update: updater?.state ?? null,
       orgs: connections.list(),
       servers: mcp.list(),
       llm: { runtimes: llm.runtimes(), models: cfg.llm.models },
@@ -296,6 +300,23 @@ export async function startUiServer(deps: UiDeps): Promise<UiServer> {
       }
     }
 
+    if (seg[1] === "update") {
+      if (!updater) {
+        return json({ error: "Updates are not available in this build" }, 404);
+      }
+      if (method === "GET" && !seg[2]) return json(updater.state);
+      if (method === "POST" && seg[2] === "check") return json(await updater.check());
+      if (method === "POST" && seg[2] === "apply") {
+        // Respond first: applying replaces the binary and restarts the process.
+        setTimeout(() => {
+          updater.apply({ restart: true }).catch((error) =>
+            log.error("update", (error as Error).message)
+          );
+        }, 50);
+        return json({ ...updater.state, phase: "downloading" }, 202);
+      }
+    }
+
     if (seg[1] === "prereqs" && method === "GET") {
       prereqs = await checkPrerequisites();
       return json({ prereqs });
@@ -318,6 +339,11 @@ export async function startUiServer(deps: UiDeps): Promise<UiServer> {
           if (Number.isInteger(port) && port > 0 && port < 65536) cfg.ui.port = port;
         }
         if (typeof input.open === "boolean") cfg.ui.open = input.open;
+        if (input.updates && typeof input.updates === "object") {
+          const u = input.updates as Record<string, unknown>;
+          if (typeof u.check === "boolean") cfg.updates.check = u.check;
+          if (typeof u.auto === "boolean") cfg.updates.auto = u.auto;
+        }
         if (typeof input.allowRemoteServerCreate === "boolean") {
           cfg.allowRemoteServerCreate = input.allowRemoteServerCreate;
         }

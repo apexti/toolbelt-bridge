@@ -108,6 +108,7 @@ import {
       : "not paired";
     const missingPrereq = (state.prereqs || []).find((p) => p.id === "node" && !p.found);
     app.innerHTML = `
+      ${renderUpdateBanner()}
       ${
       missingPrereq
         ? `<div class="banner bad">Node.js was not found. MCP servers launched with <code>npx</code> need it — <a href="https://nodejs.org" target="_blank">install Node.js</a>, then restart the bridge.</div>`
@@ -396,6 +397,23 @@ import {
     }</section>`;
   }
 
+  function renderUpdateBanner() {
+    const u = state.update;
+    if (!u) return "";
+    const busy = ["downloading", "verifying", "installing", "restarting"].includes(u.phase);
+    if (busy) {
+      const pct = u.phase === "downloading" && u.progress != null ? ` ${Math.round(u.progress * 100)}%` : "";
+      return `<div class="banner"><b>Updating to ${esc(u.latest?.tag || "the latest version")}…</b> ${esc(u.phase)}${pct}${u.phase === "restarting" ? " — this page will reconnect when the new version is up." : ""}</div>`;
+    }
+    if (u.phase === "error" && u.error) {
+      return `<div class="banner bad">${esc(u.error)} <button data-act="update-check">Retry</button>${u.latest?.url ? ` <a href="${esc(u.latest.url)}" target="_blank" rel="noopener">Download manually</a>` : ""}</div>`;
+    }
+    if (!u.updateAvailable || !u.latest) return "";
+    return `<div class="banner"><b>${esc(u.latest.tag)} is available</b> <span class="muted small">(you have v${esc(u.currentVersion)})</span>
+      ${u.canSelfUpdate ? `<button class="primary" data-act="update-apply">Update &amp; restart</button>` : `<span class="small muted">${esc(u.reason || "")}</span>`}
+      <a href="${esc(u.latest.url)}" target="_blank" rel="noopener">Release notes &amp; downloads</a></div>`;
+  }
+
   function renderSettings() {
     return `<section><h2>Settings</h2>
       <form class="grid" id="settings-form">
@@ -406,6 +424,8 @@ import {
     }>yes</option><option value="false" ${
       state.ui.open ? "" : "selected"
     }>no</option></select></label>
+        <label><span>Check for updates</span><select name="updatesCheck"><option value="true" ${state.updates?.check !== false ? "selected" : ""}>yes</option><option value="false" ${state.updates?.check === false ? "selected" : ""}>no</option></select></label>
+        <label><span>Install updates automatically</span><select name="updatesAuto"><option value="true" ${state.updates?.auto ? "selected" : ""}>yes</option><option value="false" ${state.updates?.auto ? "" : "selected"}>no</option></select></label>
         <label><span>Allow Toolbelt to add servers to this bridge</span><select name="allowRemoteServerCreate"><option value="true" ${
       state.allowRemoteServerCreate ? "selected" : ""
     }>yes</option><option value="false" ${
@@ -413,6 +433,7 @@ import {
     }>no</option></select></label>
         <button class="primary" type="submit">Save</button>
       </form>
+      <p class="small muted">Version v${esc(state.version)}${state.update?.checkedAt ? ` · last update check ${esc(state.update.checkedAt.slice(0, 16).replace("T", " "))}` : ""} <button data-act="update-check">Check now</button></p>
       <p class="small muted">Config: <code>${
       esc(state.configPath)
     }</code> · install id <code>${esc(state.installId)}</code></p>
@@ -471,6 +492,8 @@ import {
               await api("DELETE", `/api/orgs/${encodeURIComponent(org)}`);
             }
           } else if (action === "llm-refresh") await api("POST", "/api/llm/refresh");
+          else if (action === "update-check") { const r = await api("POST", "/api/update/check"); state.update = r; render(); if (r.error) toast(r.error, true); else if (!r.updateAvailable) toast(`Up to date (v${r.currentVersion})`); }
+          else if (action === "update-apply") { if (confirm("Download and install the update, then restart the bridge?")) { await api("POST", "/api/update/apply"); toast("Updating…"); } }
           else if (action === "prereqs") {
             const r = await api("GET", "/api/prereqs");
             state.prereqs = r.prereqs;
@@ -569,6 +592,7 @@ import {
         port: Number(fd.get("port")),
         open: fd.get("open") === "true",
         allowRemoteServerCreate: fd.get("allowRemoteServerCreate") === "true",
+        updates: { check: fd.get("updatesCheck") === "true", auto: fd.get("updatesAuto") === "true" },
       });
       toast("Saved");
     });

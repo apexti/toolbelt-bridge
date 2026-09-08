@@ -58,6 +58,20 @@ in; it then appears in that organization's model picker under **Organization Mod
 chat requests are tunnelled through the bridge's WebSocket to the runtime. Other
 OpenAI-compatible servers can be added with their base URL and an optional API key.
 
+## Updating
+
+The bridge checks GitHub Releases on start and every six hours (turn this off under
+_Settings → Check for updates_). When a newer version exists the local UI shows a banner
+with **Update & restart**: the matching binary is downloaded, verified against the
+release's `sha256sums.txt`, swapped over the running executable, and the bridge restarts
+itself with the same arguments. _Install updates automatically_ does the same without
+asking.
+
+From a terminal, `toolbelt-bridge update` asks the running instance to do it (or installs
+in place when nothing is running). If the binary lives somewhere the bridge cannot write
+to, or you run from source, the banner links to the release instead. Toolbelt's Bridges
+page also flags bridges that are behind the latest release.
+
 ## Command line
 
 ```
